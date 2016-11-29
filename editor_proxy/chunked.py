@@ -8,9 +8,10 @@ from __future__ import division
 from __future__ import print_function
 
 import json
+import logging
 
 from .channel import Channel
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 
 THREAD_TIMEOUT = 1.0
 
@@ -25,13 +26,16 @@ class NewStreamError(Exception):
 class ChunkedPipe:
 
   def __init__(self, input_file, output_file):
-    self.stream_channel = Channel()
+    self.stream_channel = Channel(name="ChunkedPipe")
     self.output_thread = OutputDispatchThread(output_file)
     self.input_thread = InputDispatchThread(input_file, self)
     self.output_thread.start()
     self.input_thread.start()
+    self.active_channels = set()
+    self.quit_event = Event()
 
   def Close(self):
+    self.quit_event.wait()
     self.input_thread.Quit()
     self.output_thread.Quit()
 
@@ -46,42 +50,79 @@ class ChunkedPipe:
   def WriteStream(self, stream, obj):
     self.output_thread.Write(stream, obj)
 
-  def CreateStream(self, index):
+  def CreateStream(self, index, out_of_band=False):
+    logging.debug("Creating stream with index {}".format(index))
     stream = ChunkedStream(self, index)
     self.input_thread.Attach(stream)
     self.output_thread.Attach(stream)
-    self.stream_channel.Put(stream)
+
+    if not out_of_band:
+      assert stream.index not in self.active_channels, "Stream id {} is already in use".format(stream.index)
+      self.stream_channel.Put(stream)
+      self.active_channels.add(stream.index)
+      self.quit_event.clear()
+
     return stream
 
   def CloseStream(self, stream):
     self.output_thread.Close(stream)
     self.input_thread.Close(stream)
 
+    if stream.index in self.active_channels:
+      self.active_channels.remove(stream.index)
+      if len(self.active_channels) == 0:
+        self.quit_event.set()
+
+
   def _InputDrained(self):
     self.stream_channel.Close()
 
 
+class ChunkedStream:
+
+  def __init__(self, pipe, index):
+    self.pipe = pipe
+    self.index = int(index)
+    self.channel = Channel(name="ChunkedStream")
+
+  def __iter__(self):
+    return self.channel.__iter__()
+
+  def Close(self):
+    self.channel.Close()
+    self.pipe.CloseStream(self)
+
+  def Read(self):
+    return self.channel.Get()
+
+  def Write(self, obj):
+    self.pipe.WriteStream(self, obj)
+
+  def __repr__(self):
+    return 'ChunkedStream(None, {})'.format(self.index)
+
+
 class OutputDispatchThread(Thread):
 
-  class CreateStream:
+  class CreateNewStream:
     pass
 
-  class DeleteStream:
+  class DeleteExistingStream:
     pass
 
   def __init__(self, output_file):
     super(OutputDispatchThread, self).__init__()
     self.output_file = output_file
-    self.channel = Channel()
+    self.channel = Channel(name="OutputDispatchThread")
 
   def Quit(self):
     self.channel.Close()
 
   def Attach(self, stream):
-    self.Write(stream, OutputDispatchThread.CreateStream())
+    self.Write(stream, OutputDispatchThread.CreateNewStream())
 
   def Close(self, stream):
-    self.Write(stream, OutputDispatchThread.DeleteStream())
+    self.Write(stream, OutputDispatchThread.DeleteExistingStream())
 
   def Write(self, stream, body):
     v = (stream.index, body)
@@ -97,11 +138,11 @@ class OutputDispatchThread(Thread):
 
       for (index, body) in self.channel:
 
-        if isinstance(body, OutputDispatchThread.CreateStream):
+        if isinstance(body, OutputDispatchThread.CreateNewStream):
           active_channels.add(index)
           continue
 
-        if isinstance(body, OutputDispatchThread.DeleteStream):
+        if isinstance(body, OutputDispatchThread.DeleteExistingStream):
           active_channels.remove(index)
           d = dict()
           d['i'] = index
@@ -121,7 +162,8 @@ class OutputDispatchThread(Thread):
         self.output_file.write(data)
         self.output_file.flush()
 
-    except ValueError:
+    except ValueError as e:
+      raise ValueError("While writing: {}".format(e.message ))
       return
 
     finally:
@@ -162,11 +204,14 @@ class InputDispatchThread(Thread):
       while True:
         line = self.input_file.readline()
         if line == '':
+          logging.debug("Done with input")
           return
 
-        if line.strip() == '':
+        # Stray newlines?
+        if line.strip() == '' or line == '\n':
           continue
 
+        logging.debug("Header %s", repr(line))
         v = json.loads(line)
         if not v or 'i' not in v:
           raise IOError('Input malformed: [{}]'.format(line))
@@ -175,16 +220,22 @@ class InputDispatchThread(Thread):
           body = None
         elif 's' not in v:
           raise IOError('Input malformed: [{}]'.format(line))
+        elif v.get('s') == 'l':
+          line = self.input_file.readline()
+          body = json.loads(line)
         else:
-          body = json.loads(self.input_file.read(v.get('s')))
+          line = self.input_file.read(int(v.get('s')))
+          body = json.loads(line)
 
+        logging.debug("Payload from input: %s", repr(body))
         stream = None
+        stream_id = int(v.get('i'))
         with self.lock:
-          if v.get('i') in self.streams:
-            stream = self.streams[int(v.get('i'))]
+          if stream_id in self.streams:
+            stream = self.streams[stream_id]
 
         if stream is None:
-          stream = self.pipe.CreateStream(v.get('i'))
+          stream = self.pipe.CreateStream(stream_id)
 
         if body is None:
           stream.channel.Close()
@@ -192,7 +243,8 @@ class InputDispatchThread(Thread):
           stream.channel.Put(body)
 
     except ValueError as v:
-      raise ValueError(v.message + ' line:[{}]'.format(line))
+      logging.exception("Can't process input stream.")
+      return
 
     finally:
       with self.lock:
@@ -202,30 +254,9 @@ class InputDispatchThread(Thread):
       self.pipe._InputDrained()
 
 
-class ChunkedStream:
-
-  def __init__(self, pipe, index):
-    self.pipe = pipe
-    self.index = int(index)
-    self.channel = Channel()
-
-  def __iter__(self):
-    return self.channel.__iter__()
-
-  def Close(self):
-    self.channel.Close()
-    self.pipe.CloseStream(self)
-
-  def Read(self):
-    return self.channel.Get()
-
-  def Write(self, obj):
-    self.pipe.WriteStream(self, obj)
-
-
 class ChunkedFileStream:
 
-  def __init__(self, stream, out_token='stdout'):
+  def __init__(self, stream, out_token='stdout', input_filter=None):
     self.stream = stream
     self.out_token = out_token
 

@@ -9,6 +9,7 @@ from __future__ import print_function
 
 import sys
 import json
+import logging
 from StringIO import StringIO
 from threading import Lock, Thread
 from collections import deque
@@ -17,43 +18,112 @@ from collections import deque
 class PipeRequestHandler(Thread):
 
   def __init__(self, stream, environ, app):
+    super(PipeRequestHandler, self).__init__()
     self.stream = stream
     self.environ = environ
     self.app = app
 
-  def run(self):
+    self.status = None
+    self.headers = None
+    self.headers_sent = False
+    self.buffered_body = ''
+    self.buffering = False
 
-    headers_set = []
-    headers_sent = []
+  def SendHeadersIfNotBuffering(self):
+    if self.headers_sent or self.buffering:
+      return
+
+    self.headers_sent = True
+    d = dict()
+    d['st'] = self.status
+    d['h'] = self.headers
+    self.stream.Write(d)
+
+  def OnStartResponse(self, status, headers, exc_info):
+    logging.debug("start_response(%s, %s)", repr(status), repr(headers))
+    if exc_info:
+      try:
+        if self.headers_sent:
+          raise exc_info[0], exc_info[1], exc_info[2]
+      finally:
+        exc_info = None
+
+    self.status = status
+    self.headers = headers
+
+    if ('Content-Type', 'application/json') in self.headers:
+      self.buffering = True
 
     def write(data):
-      if not headers_sent:
-        d = dict()
-        d['st'], d['h'] = headers_set[:] = headers_set
-        self.stream.Write(d)
+      return self.OnWrite(data)
 
-      d = dict()
-      d['d'] = data
-      self.stream.Write(d)
+    return write
 
-    def start_response(status, response_headers, exc_info=None):
-      if exc_info:
-        try:
-          if headers_sent:
-            raise exc_info[0], exc_info[1], exc_info[2]
-        finally:
-          exc_info = None
+  def OnWrite(self, data):
+    self.SendHeadersIfNotBuffering()
 
-      headers_set[:] = [status, response_headers]
-      return write
+    if self.buffering:
+      self.buffered_body += data
+      return
 
-    result = self.app(self.environ, start_response)
+    d = dict()
+    d['d'] = data
+    self.stream.Write(d)
+
+
+  def run(self):
+
+    try:
+      head = self.stream.Read()
+      logging.debug("Received headers %s", repr(head))
+
+      assert head is not None, 'Unexpected EOF while reading request header'
+      assert 'p' in head, '"p" not found in header object: {}'.format(repr(head))
+
+      if 'd' in head:
+        body = head
+      else:
+        body = self.stream.Read()
+        logging.debug("Received body %s", repr(body))
+
+      assert body is not None, 'Unexpected EOF while reading request body'
+      assert 'd' in body, '"d" not found in body object: {}'.format(repr(body))
+
+    except:
+      self.stream.Close()
+      return
+
+    data = body.get('d', '')
+
+    environ = dict(self.environ.items())
+    environ['wsgi.input'] = StringIO(data)
+    environ['wsgi.errors'] = sys.stderr
+    environ['REQUEST_METHOD'] = head.get('m', 'GET')
+    environ['PATH_INFO'] = head.get('p', '/')
+    environ['QUERY_STRING'] = head.get('q', '')
+    environ['CONTENT_LENGTH'] = len(data)
+
+    for (k,v) in head.get('h', []):
+      key_with_underscores = k.upper().replace('-', '_')
+      environ['HTTP_{}'.format(key_with_underscores)] = v
+
+    def start_response(s,h,e = None):
+      return self.OnStartResponse(s,h,e)
+
+    result = self.app(environ, start_response)
     try:
       for data in result:
         if data:
-          write(data)
-      if not headers_sent:
-        write('')
+          self.OnWrite(data)
+      if not self.headers_sent:
+        self.OnWrite('')
+
+      if self.buffering:
+        d = dict()
+        d['st'] = self.status
+        d['h'] = self.headers
+        d['o'] = json.loads(self.buffered_body)
+        self.stream.Write(d)
     finally:
       if hasattr(result, 'close'):
         result.close()
@@ -81,17 +151,14 @@ class PipeServer:
     self.pipe = pipe
 
   def DispatchRequest(self, stream):
-    environ = dict(self.base_environ.items())
-    environ['wsgi.input'] = StringIO(data)
-    environ['REQUEST_METHOD'] = h.get('m', 'GET')
-    environ['PATH_INFO'] = h.get('p', '/')
-    environ['QUERY_STRING'] = h.get('q', '')
-    environ['CONTENT_LENGTH'] = len(data)
-    environ['pipe.index'] = h.get('i', -1)
-    t = PipeRequestHandler(stream, environ, self.app)
+    t = PipeRequestHandler(stream, self.base_environ, self.app)
     t.start()
+
+  def Shutdown(self):
+    pass
 
   def Run(self):
     for stream in self.pipe:
+      logging.debug("Starting %s", repr(stream))
       self.DispatchRequest(stream)
     self.pipe.Close()

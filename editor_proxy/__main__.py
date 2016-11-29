@@ -19,11 +19,20 @@ sys.path.insert(
     os.path.normpath(
         os.path.join(DIR_OF_CURRENT_SCRIPT, '..', 'third_party', 'ycmd')))
 
+from ycmd.server_utils import SetUpPythonPath
+SetUpPythonPath()
+
+import logging
+import atexit
+import signal
+import json
+
 from ycmd import extra_conf_store, user_options_store, utils
 from ycmd.utils import ToBytes, ReadFile, OpenForStdHandle
 from ycmd.server_utils import CompatibleWithCurrentCore
 from .pipe_server import PipeServer
 from .chunked import ChunkedPipe, ChunkedFileStream
+from bottle import debug
 
 
 def SetupLogging(log_level):
@@ -34,6 +43,10 @@ def SetupLogging(log_level):
   # Has to be called before any call to logging.getLogger()
   logging.basicConfig(
       format='%(asctime)s - %(levelname)s - %(message)s', level=numeric_level)
+  logging.info("Starting log")
+
+  if log_level == 'debug':
+    debug(True)
 
 
 def ParseArguments():
@@ -84,8 +97,8 @@ def YcmCoreSanityCheck():
 def OpenStdPipe():
   global _pipe
   _pipe = ChunkedPipe(sys.stdin, sys.stdout)
-  stdiofile = ChunkedFileStream(_pipe.CreateStream(0))
-  stderrfile = ChunkedFileStream(_pipe.CreateStream(1))
+  stdiofile = ChunkedFileStream(_pipe.CreateStream(0, out_of_band=True))
+  stderrfile = ChunkedFileStream(_pipe.CreateStream(1, out_of_band=True), out_token='stderr')
 
   sys.stdin = stdiofile
   sys.stdout = stdiofile

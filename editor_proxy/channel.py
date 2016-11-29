@@ -10,13 +10,15 @@ from __future__ import print_function
 from threading import Condition
 from collections import deque
 
+import logging
 
 class Channel:
 
-  def __init__(self):
+  def __init__(self, name=None):
     self.cond = Condition()
     self.queue = deque()
     self.done = False
+    self.name = name
 
   def __iter__(self):
     return self
@@ -25,12 +27,14 @@ class Channel:
     o = self.Get()
     if o is None:
       raise StopIteration
+    logging.debug("%s returning %s", repr(self), repr(o))
     return o
 
   def Put(self, o):
     if o is None:
       raise ValueError("'None' is not a value datum")
 
+    logging.debug("%s adding %s", repr(self), repr(o))
     with self.cond:
       self.queue.append(o)
       self.cond.notify()
@@ -49,3 +53,6 @@ class Channel:
     with self.cond:
       self.queue.append(None)
       self.cond.notify()
+
+  def __repr__(self):
+    return "Channel({})".format(repr(self.name))
