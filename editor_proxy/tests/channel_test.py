@@ -8,12 +8,13 @@ import os
 import sys
 import unittest
 
-DIR_OF_CURRENT_SCRIPT = os.path.dirname( os.path.abspath( __file__ ) )
-sys.path.insert( 0, os.path.normpath( os.path.join(
-    DIR_OF_CURRENT_SCRIPT, '..', '..' ) ) )
+DIR_OF_CURRENT_SCRIPT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(
+    0, os.path.normpath(os.path.join(DIR_OF_CURRENT_SCRIPT, '..', '..')))
 
 from threading import Thread
 from editor_proxy.channel import Channel
+
 
 class ChannelTest(unittest.TestCase):
 
@@ -23,12 +24,10 @@ class ChannelTest(unittest.TestCase):
     self.assertEqual(1, c.Get())
     c.Close()
 
-  
   def testReadAfterClose(self):
     c = Channel()
     c.Close()
     self.assertEqual(None, c.Get())
-
 
   def testOffThreadWrite(self):
     c = Channel()
@@ -41,7 +40,7 @@ class ChannelTest(unittest.TestCase):
 
     self.assertEqual(1, c.Get())
     c.Close()
-  
+
   def testOffThreadWrites(self):
     c = Channel()
 
@@ -77,7 +76,6 @@ class ChannelTest(unittest.TestCase):
     self.assertSequenceEqual([1, 2, 3], r)
     c.Close()
 
-
   def testNoneIsInvalid(self):
     with self.assertRaises(ValueError):
       c = Channel()
@@ -97,6 +95,7 @@ class ChannelTest(unittest.TestCase):
     c.Close()
 
     self.assertSequenceEqual(range(10), [x for x in c])
+
 
 if __name__ == '__main__':
   unittest.main()
