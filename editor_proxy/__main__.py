@@ -97,7 +97,9 @@ def OpenStdPipe():
   global _pipe
   _pipe = ChunkedPipe(sys.stdin, sys.stdout)
   stdiofile = ChunkedFileStream(_pipe.CreateStream(0, out_of_band=True))
-  stderrfile = ChunkedFileStream(_pipe.CreateStream(1, out_of_band=True), out_token='stderr')
+  stderrfile = ChunkedFileStream(
+      _pipe.CreateStream(
+          1, out_of_band=True), out_token='stderr')
 
   sys.stdin = stdiofile
   sys.stdout = stdiofile

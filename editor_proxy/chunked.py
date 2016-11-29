@@ -26,7 +26,7 @@ class NewStreamError(Exception):
 class ChunkedPipe:
 
   def __init__(self, input_file, output_file):
-    self.stream_channel = Channel(name="ChunkedPipe")
+    self.stream_channel = Channel(name='ChunkedPipe')
     self.output_thread = OutputDispatchThread(output_file)
     self.input_thread = InputDispatchThread(input_file, self)
     self.output_thread.start()
@@ -51,13 +51,15 @@ class ChunkedPipe:
     self.output_thread.Write(stream, obj)
 
   def CreateStream(self, index, out_of_band=False):
-    logging.debug("Creating stream with index {}".format(index))
+    logging.debug('Creating stream with index {}'.format(index))
     stream = ChunkedStream(self, index)
     self.input_thread.Attach(stream)
     self.output_thread.Attach(stream)
 
     if not out_of_band:
-      assert stream.index not in self.active_channels, "Stream id {} is already in use".format(stream.index)
+      assert stream.index not in self.active_channels, ('Stream id {} is '
+                                                        'already in use').format(
+          stream.index)
       self.stream_channel.Put(stream)
       self.active_channels.add(stream.index)
       self.quit_event.clear()
@@ -73,7 +75,6 @@ class ChunkedPipe:
       if len(self.active_channels) == 0:
         self.quit_event.set()
 
-
   def _InputDrained(self):
     self.stream_channel.Close()
 
@@ -83,7 +84,7 @@ class ChunkedStream:
   def __init__(self, pipe, index):
     self.pipe = pipe
     self.index = int(index)
-    self.channel = Channel(name="ChunkedStream")
+    self.channel = Channel(name='ChunkedStream')
 
   def __iter__(self):
     return self.channel.__iter__()
@@ -113,7 +114,7 @@ class OutputDispatchThread(Thread):
   def __init__(self, output_file):
     super(OutputDispatchThread, self).__init__()
     self.output_file = output_file
-    self.channel = Channel(name="OutputDispatchThread")
+    self.channel = Channel(name='OutputDispatchThread')
 
   def Quit(self):
     self.channel.Close()
@@ -163,7 +164,7 @@ class OutputDispatchThread(Thread):
         self.output_file.flush()
 
     except ValueError as e:
-      raise ValueError("While writing: {}".format(e.message ))
+      raise ValueError('While writing: {}'.format(e.message))
       return
 
     finally:
@@ -204,14 +205,14 @@ class InputDispatchThread(Thread):
       while True:
         line = self.input_file.readline()
         if line == '':
-          logging.debug("Done with input")
+          logging.debug('Done with input')
           return
 
         # Stray newlines?
         if line.strip() == '' or line == '\n':
           continue
 
-        logging.debug("Header %s", repr(line))
+        logging.debug('Header %s', repr(line))
         v = json.loads(line)
         if not v or 'i' not in v:
           raise IOError('Input malformed: [{}]'.format(line))
@@ -227,7 +228,7 @@ class InputDispatchThread(Thread):
           line = self.input_file.read(int(v.get('s')))
           body = json.loads(line)
 
-        logging.debug("Payload from input: %s", repr(body))
+        logging.debug('Payload from input: %s', repr(body))
         stream = None
         stream_id = int(v.get('i'))
         with self.lock:

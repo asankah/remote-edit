@@ -40,7 +40,7 @@ class PipeRequestHandler(Thread):
     self.stream.Write(d)
 
   def OnStartResponse(self, status, headers, exc_info):
-    logging.debug("start_response(%s, %s)", repr(status), repr(headers))
+    logging.debug('start_response(%s, %s)', repr(status), repr(headers))
     if exc_info:
       try:
         if self.headers_sent:
@@ -70,21 +70,21 @@ class PipeRequestHandler(Thread):
     d['d'] = data
     self.stream.Write(d)
 
-
   def run(self):
 
     try:
       head = self.stream.Read()
-      logging.debug("Received headers %s", repr(head))
+      logging.debug('Received headers %s', repr(head))
 
       assert head is not None, 'Unexpected EOF while reading request header'
-      assert 'p' in head, '"p" not found in header object: {}'.format(repr(head))
+      assert 'p' in head, '"p" not found in header object: {}'.format(
+          repr(head))
 
       if 'd' in head:
         body = head
       else:
         body = self.stream.Read()
-        logging.debug("Received body %s", repr(body))
+        logging.debug('Received body %s', repr(body))
 
       assert body is not None, 'Unexpected EOF while reading request body'
       assert 'd' in body, '"d" not found in body object: {}'.format(repr(body))
@@ -103,12 +103,12 @@ class PipeRequestHandler(Thread):
     environ['QUERY_STRING'] = head.get('q', '')
     environ['CONTENT_LENGTH'] = len(data)
 
-    for (k,v) in head.get('h', []):
+    for (k, v) in head.get('h', []):
       key_with_underscores = k.upper().replace('-', '_')
       environ['HTTP_{}'.format(key_with_underscores)] = v
 
-    def start_response(s,h,e = None):
-      return self.OnStartResponse(s,h,e)
+    def start_response(s, h, e=None):
+      return self.OnStartResponse(s, h, e)
 
     result = self.app(environ, start_response)
     try:
@@ -159,6 +159,6 @@ class PipeServer:
 
   def Run(self):
     for stream in self.pipe:
-      logging.debug("Starting %s", repr(stream))
+      logging.debug('Starting %s', repr(stream))
       self.DispatchRequest(stream)
     self.pipe.Close()

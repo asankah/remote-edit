@@ -12,6 +12,7 @@ from collections import deque
 
 import logging
 
+
 class Channel:
 
   def __init__(self, name=None):
