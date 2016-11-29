@@ -43,7 +43,6 @@ def SetupLogging(log_level):
   # Has to be called before any call to logging.getLogger()
   logging.basicConfig(
       format='%(asctime)s - %(levelname)s - %(message)s', level=numeric_level)
-  logging.info("Starting log")
 
   if log_level == 'debug':
     debug(True)
