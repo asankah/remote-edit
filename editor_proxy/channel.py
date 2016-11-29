@@ -10,7 +10,9 @@ from __future__ import print_function
 from threading import Condition
 from collections import deque
 
+
 class Channel:
+
   def __init__(self):
     self.cond = Condition()
     self.queue = deque()
@@ -37,7 +39,7 @@ class Channel:
     with self.cond:
       while len(self.queue) == 0 and not self.done:
         self.cond.wait()
-      
+
       o = self.queue.popleft()
       if o is None:
         self.done = True
@@ -47,4 +49,3 @@ class Channel:
     with self.cond:
       self.queue.append(None)
       self.cond.notify()
-

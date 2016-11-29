@@ -13,7 +13,9 @@ from StringIO import StringIO
 from threading import Lock, Thread
 from collections import deque
 
+
 class PipeRequestHandler(Thread):
+
   def __init__(self, stream, environ, app):
     self.stream = stream
     self.environ = environ
@@ -59,6 +61,7 @@ class PipeRequestHandler(Thread):
 
 
 class PipeServer:
+
   def __init__(self, app, pipe):
     self.app = app
     self.request_map = {}
@@ -92,5 +95,3 @@ class PipeServer:
     for stream in self.pipe:
       self.DispatchRequest(stream)
     self.pipe.Close()
-
-

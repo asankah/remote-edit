@@ -12,14 +12,18 @@ import json
 from .channel import Channel
 from threading import Thread, Lock
 
-THREAD_TIMEOUT=1.0
+THREAD_TIMEOUT = 1.0
+
 
 class NewStreamError(Exception):
+
   def __init__(self, index, body):
     self.index = index
     self.body = body
 
+
 class ChunkedPipe:
+
   def __init__(self, input_file, output_file):
     self.stream_channel = Channel()
     self.output_thread = OutputDispatchThread(output_file)
@@ -56,9 +60,12 @@ class ChunkedPipe:
   def _InputDrained(self):
     self.stream_channel.Close()
 
+
 class OutputDispatchThread(Thread):
+
   class CreateStream:
     pass
+
   class DeleteStream:
     pass
 
@@ -81,8 +88,9 @@ class OutputDispatchThread(Thread):
     self.channel.Put(v)
 
   def run(self):
+
     def Serialize(o):
-      return json.dumps(o, separators=(',',':'))
+      return json.dumps(o, separators=(',', ':'))
 
     try:
       active_channels = set()
@@ -103,7 +111,7 @@ class OutputDispatchThread(Thread):
           continue
 
         if index not in active_channels:
-          raise ValueError("Writing to inactive channel")
+          raise ValueError('Writing to inactive channel')
 
         data = Serialize(body)
         d = dict()
@@ -126,6 +134,7 @@ class OutputDispatchThread(Thread):
 
 
 class InputDispatchThread(Thread):
+
   def __init__(self, input_file, pipe):
     super(InputDispatchThread, self).__init__()
     self.input_file = input_file
@@ -142,7 +151,7 @@ class InputDispatchThread(Thread):
 
   def Close(self, stream):
     if not isinstance(stream, ChunkedStream):
-      raise ValueError("Invalid stream.")
+      raise ValueError('Invalid stream.')
     with self.lock:
       if stream.index in self.streams:
         del self.streams[stream.index]
@@ -160,12 +169,12 @@ class InputDispatchThread(Thread):
 
         v = json.loads(line)
         if not v or 'i' not in v:
-          raise IOError("Input malformed: [{}]".format(line))
+          raise IOError('Input malformed: [{}]'.format(line))
 
         if 'close' in v:
           body = None
         elif 's' not in v:
-          raise IOError("Input malformed: [{}]".format(line))
+          raise IOError('Input malformed: [{}]'.format(line))
         else:
           body = json.loads(self.input_file.read(v.get('s')))
 
@@ -183,7 +192,7 @@ class InputDispatchThread(Thread):
           stream.channel.Put(body)
 
     except ValueError as v:
-      raise ValueError(v.message + " line:[{}]".format(line))
+      raise ValueError(v.message + ' line:[{}]'.format(line))
 
     finally:
       with self.lock:
@@ -194,6 +203,7 @@ class InputDispatchThread(Thread):
 
 
 class ChunkedStream:
+
   def __init__(self, pipe, index):
     self.pipe = pipe
     self.index = int(index)
@@ -214,12 +224,13 @@ class ChunkedStream:
 
 
 class ChunkedFileStream:
+
   def __init__(self, stream, out_token='stdout'):
     self.stream = stream
     self.out_token = out_token
 
   def close(self):
-    self.stream.Close();
+    self.stream.Close()
 
   def flush(self):
     pass
@@ -227,13 +238,13 @@ class ChunkedFileStream:
   def next(self):
     raise NotImplementedError()
 
-  def read(self, size = -1):
+  def read(self, size=-1):
     raise NotImplementedError()
 
-  def readline(self, size = -1):
+  def readline(self, size=-1):
     raise NotImplementedError()
 
-  def readlines(self, size = -1):
+  def readlines(self, size=-1):
     raise NotImplementedError()
 
   def write(self, buf):
@@ -268,4 +279,3 @@ class ChunkedFileStream:
 
   def newlines(self):
     return None
-
