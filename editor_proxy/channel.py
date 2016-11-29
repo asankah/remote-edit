@@ -38,16 +38,13 @@ class Channel:
       while len(self.queue) == 0 and not self.done:
         self.cond.wait()
       
-      if self.done:
-        return None
-
       o = self.queue.popleft()
       if o is None:
-        raise ValueError("'None' is not a value datum")
+        self.done = True
     return o
 
   def Close(self):
     with self.cond:
-      self.done = True
+      self.queue.append(None)
       self.cond.notify()
 

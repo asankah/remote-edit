@@ -22,10 +22,10 @@ class NewStreamError(Exception):
 class ChunkedPipe:
   def __init__(self, input_file, output_file):
     self.stream_channel = Channel()
-    self.input_thread = InputDispatchThread(input_file, self, self.stream_channel)
-    self.input_thread.start()
     self.output_thread = OutputDispatchThread(output_file)
+    self.input_thread = InputDispatchThread(input_file, self)
     self.output_thread.start()
+    self.input_thread.start()
 
   def Close(self):
     self.input_thread.Quit()
@@ -45,13 +45,23 @@ class ChunkedPipe:
   def CreateStream(self, index):
     stream = ChunkedStream(self, index)
     self.input_thread.Attach(stream)
+    self.output_thread.Attach(stream)
+    self.stream_channel.Put(stream)
     return stream
 
   def CloseStream(self, stream):
     self.output_thread.Close(stream)
     self.input_thread.Close(stream)
 
+  def _InputDrained(self):
+    self.stream_channel.Close()
+
 class OutputDispatchThread(Thread):
+  class CreateStream:
+    pass
+  class DeleteStream:
+    pass
+
   def __init__(self, output_file):
     super(OutputDispatchThread, self).__init__()
     self.output_file = output_file
@@ -61,44 +71,72 @@ class OutputDispatchThread(Thread):
   def Quit(self):
     self.channel.Close()
 
+  def Attach(self, stream):
+    self.Write(stream, OutputDispatchThread.CreateStream())
+
   def Close(self, stream):
-    self.Write(stream, None)
+    self.Write(stream, OutputDispatchThread.DeleteStream())
 
   def Write(self, stream, body):
     v = (stream.index, body)
     self.channel.Put(v)
 
   def run(self):
-    for (index, body) in self.channel:
+    def Serialize(o):
+      return json.dumps(o, separators=(',',':'))
 
-      if body is None:
+    try:
+      active_channels = set()
+
+      for (index, body) in self.channel:
+
+        if isinstance(body, OutputDispatchThread.CreateStream):
+          active_channels.add(index)
+          continue
+
+        if isinstance(body, OutputDispatchThread.DeleteStream):
+          active_channels.remove(index)
+          d = dict()
+          d['i'] = index
+          d['close'] = True
+          self.output_file.write(Serialize(d) + '\n')
+          self.output_file.flush()
+          continue
+
+        if index not in active_channels:
+          raise ValueError("Writing to inactive channel")
+
+        data = Serialize(body)
         d = dict()
+        d['s'] = len(data)
         d['i'] = index
-        d['close'] = True
-        self.output_file.write(json.dumps(d) + '\n')
+        self.output_file.write(Serialize(d) + '\n')
+        self.output_file.write(data)
         self.output_file.flush()
-        continue
 
-      data = json.dumps(body)
-      d = dict()
-      d['s'] = len(data)
-      d['i'] = index
-      self.output_file.write(json.dumps(d) + '\n')
-      self.output_file.write(data)
+    except ValueError:
+      return
+
+    finally:
+      for v in active_channels:
+        d = dict()
+        d['i'] = v
+        d['close'] = True
+        self.output_file.write(Serialize(d) + '\n')
       self.output_file.flush()
 
+
 class InputDispatchThread(Thread):
-  def __init__(self, input_file, pipe, stream_channel):
+  def __init__(self, input_file, pipe):
     super(InputDispatchThread, self).__init__()
     self.input_file = input_file
     self.pipe = pipe
     self.lock = Lock()
     self.streams = {}
-    self.stream_channel = stream_channel
     self.daemon = True
 
   def Quit(self):
-    self.stream_channel.Close()
+    pass
 
   def Attach(self, stream):
     with self.lock:
@@ -108,51 +146,66 @@ class InputDispatchThread(Thread):
     if not isinstance(stream, ChunkedStream):
       raise ValueError("Invalid stream.")
     with self.lock:
-      del self.streams[stream.index]
+      if stream.index in self.streams:
+        del self.streams[stream.index]
 
   def run(self):
-    line = self.input_file.readline()
-    if line == '':
-      self.stream_channel.Close()
-      return
+    line = None
+    try:
+      while True:
+        line = self.input_file.readline()
+        if line == '':
+          return
 
-    v = json.loads(line)
-    if not v or 'i' not in v:
-      raise IOError("Input malformed: [{}]".format(line))
+        if line.strip() == '':
+          continue
 
-    if 'close' in v:
-      body = None
-    elif 's' not in v:
-      raise IOError("Input malformed: [{}]".format(line))
-    else:
-      body = json.loads(self.input_file.read(v.get('s')))
+        v = json.loads(line)
+        if not v or 'i' not in v:
+          raise IOError("Input malformed: [{}]".format(line))
 
-    with self.lock:
-      if v.get('i') not in self.streams:
-        stream = ChunkedStream(self.pipe, v.get('i'))
-        self.streams[v.get('i')] = stream
-        self.stream_channel.Put(stream)
-      else:
-        stream = self.streams[v.get('i')]
+        if 'close' in v:
+          body = None
+        elif 's' not in v:
+          raise IOError("Input malformed: [{}]".format(line))
+        else:
+          body = json.loads(self.input_file.read(v.get('s')))
 
-    stream.channel.Put(body)
+        stream = None
+        with self.lock:
+          if v.get('i') in self.streams:
+            stream = self.streams[int(v.get('i'))]
+
+        if stream is None:
+          stream = self.pipe.CreateStream(v.get('i'))
+
+        if body is None:
+          stream.channel.Close()
+        else:
+          stream.channel.Put(body)
+
+    except ValueError as v:
+      raise ValueError(v.message + " line:[{}]".format(line))
+
+    finally:
+      with self.lock:
+        streams = self.streams.values()
+      for stream in streams:
+        stream.channel.Close()
+      self.pipe._InputDrained()
+
 
 class ChunkedStream:
   def __init__(self, pipe, index):
     self.pipe = pipe
-    self.index = index
+    self.index = int(index)
     self.channel = Channel()
 
   def __iter__(self):
-    return self
-
-  def next(self):
-    o = self.Read()
-    if o is None:
-      raise StopIteration
-    return o
+    return self.channel.__iter__()
 
   def Close(self):
+    self.channel.Close()
     self.pipe.CloseStream(self)
 
   def Read(self):

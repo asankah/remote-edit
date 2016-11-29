@@ -26,7 +26,7 @@ class ChunkedTest(unittest.TestCase):
     stream.Close()
 
     pipe.Join()
-    self.assertEqual('{"i": 1, "s": 10}\n{"a": "b"}{"i": 1, "close": true}\n',
+    self.assertEqual('{"i":1,"s":9}\n{"a":"b"}{"i":1,"close":true}\n',
                      out.getvalue())
 
   def testInput(self):
@@ -34,17 +34,33 @@ class ChunkedTest(unittest.TestCase):
     pipe = chunked.ChunkedPipe(open('basic.in', 'r'), out)
 
     for stream in pipe:
-      print("Found stream")
       for o in stream:
-        print("Found object {}".format(o))
         stream.Write({'found': o})
-        print("Done writing")
-      print("Done with stream")
       stream.Close()
-      print("Stream closed")
 
     pipe.Join()
-    self.assertEqual('', out.getvalue())
+    self.assertEqual('{"i":1,"s":19}\n{"found":{"a":"b"}}'
+                     '{"i":1,"s":19}\n{"found":{"a":"b"}}'
+                     '{"i":1,"s":19}\n{"found":{"a":"b"}}'
+                     '{"i":1,"close":true}\n', out.getvalue())
+
+  def testInterleavedInputs(self):
+    out = StringIO()
+    pipe = chunked.ChunkedPipe(open('interleaved.in', 'r'), out)
+    for stream in pipe:
+      for o in stream:
+        stream.Write(o)
+      stream.Close()
+
+    pipe.Join()
+    self.assertEqual('{"i":1,"s":7}\n{"a":1}'
+                     '{"i":1,"s":7}\n{"a":1}'
+                     '{"i":1,"close":true}\n'
+                     '{"i":2,"s":7}\n{"a":2}'
+                     '{"i":2,"s":7}\n{"a":2}'
+                     '{"i":2,"close":true}\n'
+                     '{"i":3,"s":7}\n{"a":3}'
+                     '{"i":3,"close":true}\n', out.getvalue())
 
 if __name__ == '__main__':
   unittest.main()
