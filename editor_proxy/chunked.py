@@ -12,6 +12,8 @@ import json
 from .channel import Channel
 from threading import Thread, Lock
 
+THREAD_TIMEOUT=1.0
+
 class NewStreamError(Exception):
   def __init__(self, index, body):
     self.index = index
@@ -30,8 +32,9 @@ class ChunkedPipe:
     self.output_thread.Quit()
 
   def Join(self):
-    self.input_thread.join()
-    self.output_thread.join()
+    self.Close()
+    self.input_thread.join(THREAD_TIMEOUT)
+    self.output_thread.join(THREAD_TIMEOUT)
 
   def __iter__(self):
     return self.stream_channel.__iter__()
@@ -50,13 +53,16 @@ class ChunkedPipe:
 
 class OutputDispatchThread(Thread):
   def __init__(self, output_file):
+    super(OutputDispatchThread, self).__init__()
     self.output_file = output_file
     self.channel = Channel()
     self.daemon = True
-    super(OutputDispatchThread, self).__init__()
+
+  def Quit(self):
+    self.channel.Close()
 
   def Close(self, stream):
-    self.Write(stream.index, None)
+    self.Write(stream, None)
 
   def Write(self, stream, body):
     v = (stream.index, body)
@@ -83,16 +89,16 @@ class OutputDispatchThread(Thread):
 
 class InputDispatchThread(Thread):
   def __init__(self, input_file, pipe, stream_channel):
+    super(InputDispatchThread, self).__init__()
     self.input_file = input_file
     self.pipe = pipe
     self.lock = Lock()
     self.streams = {}
     self.stream_channel = stream_channel
     self.daemon = True
-    super(InputDispatchThread, self).__init__()
 
   def Quit(self):
-    pass
+    self.stream_channel.Close()
 
   def Attach(self, stream):
     with self.lock:
@@ -107,7 +113,8 @@ class InputDispatchThread(Thread):
   def run(self):
     line = self.input_file.readline()
     if line == '':
-      raise EOFError()
+      self.stream_channel.Close()
+      return
 
     v = json.loads(line)
     if not v or 'i' not in v:
@@ -118,15 +125,15 @@ class InputDispatchThread(Thread):
     elif 's' not in v:
       raise IOError("Input malformed: [{}]".format(line))
     else:
-      body = json.loads(self.input_file.read(v.s))
+      body = json.loads(self.input_file.read(v.get('s')))
 
     with self.lock:
-      if v.i not in self.streams:
-        stream = ChunkedStream(self.pipe, v.i)
-        self.streams[v.i] = stream
-        stream_channel.Put(stream)
+      if v.get('i') not in self.streams:
+        stream = ChunkedStream(self.pipe, v.get('i'))
+        self.streams[v.get('i')] = stream
+        self.stream_channel.Put(stream)
       else:
-        stream = self.streams[v.i]
+        stream = self.streams[v.get('i')]
 
     stream.channel.Put(body)
 
@@ -140,7 +147,7 @@ class ChunkedStream:
     return self
 
   def next(self):
-    o = Read()
+    o = self.Read()
     if o is None:
       raise StopIteration
     return o

@@ -35,7 +35,7 @@ class Channel:
 
   def Get(self):
     with self.cond:
-      if len(self.queue) == 0 and not self.done:
+      while len(self.queue) == 0 and not self.done:
         self.cond.wait()
       
       if self.done:
