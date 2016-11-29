@@ -66,7 +66,6 @@ class OutputDispatchThread(Thread):
     super(OutputDispatchThread, self).__init__()
     self.output_file = output_file
     self.channel = Channel()
-    self.daemon = True
 
   def Quit(self):
     self.channel.Close()
@@ -133,7 +132,6 @@ class InputDispatchThread(Thread):
     self.pipe = pipe
     self.lock = Lock()
     self.streams = {}
-    self.daemon = True
 
   def Quit(self):
     pass
@@ -216,8 +214,9 @@ class ChunkedStream:
 
 
 class ChunkedFileStream:
-  def __init__(self, stream):
+  def __init__(self, stream, out_token='stdout'):
     self.stream = stream
+    self.out_token = out_token
 
   def close(self):
     self.stream.Close();
@@ -226,20 +225,20 @@ class ChunkedFileStream:
     pass
 
   def next(self):
-    pass
+    raise NotImplementedError()
 
   def read(self, size = -1):
-    pass
+    raise NotImplementedError()
 
   def readline(self, size = -1):
-    pass
+    raise NotImplementedError()
 
   def readlines(self, size = -1):
-    pass
+    raise NotImplementedError()
 
   def write(self, buf):
     d = dict()
-    d['std'] = buf
+    d[self.out_token] = buf
     self.stream.Write(d)
 
   def writelines(self, seq):
@@ -247,13 +246,13 @@ class ChunkedFileStream:
       self.write(line)
 
   def seek(self, offset, whence):
-    raise NotImplementedError("Can't seek inside a chunked stream.")
+    raise NotImplementedError()
 
   def tell(self):
-    raise NotImplementedError("Can't tell offset of a chunked stream.")
+    raise NotImplementedError()
 
   def truncate(self, size):
-    raise NotImplementedError("Can't truncate a ChunkedStream.")
+    raise NotImplementedError()
 
   def closed(self):
     return False

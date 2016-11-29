@@ -21,6 +21,7 @@ from ycmd import extra_conf_store, user_options_store, utils
 from ycmd.utils import ToBytes, ReadFile, OpenForStdHandle
 from ycmd.server_utils import CompatibleWithCurrentCore
 from .pipe_server import PipeServer
+from .chunked import ChunkedPipe, ChunkedFileStream
 
 def SetupLogging( log_level ):
   numeric_level = getattr( logging, log_level.upper(), None )
@@ -63,12 +64,30 @@ def SetupOptions( options_file ):
   return options
 
 
+def YcmCoreSanityCheck():
+  if 'ycm_core' in sys.modules:
+    raise RuntimeError( 'ycm_core already imported, ycmd has a bug!' )
+
+def OpenStdPipe():
+  global _pipe
+  _pipe = ChunkedPipe(sys.stdin, sys.stdout)
+  stdiofile = ChunkedFileStream(_pipe.CreateStream(0))
+  stderrfile = ChunkedFileStream(_pipe.CreateStream(1))
+
+  sys.stdin = stdiofile
+  sys.stdout = stdiofile
+  sys.stderr = stderrfile
+
+  return _pipe
+
+
 def Main():
   args = ParseArguments()
 
   SetupLogging( args.log )
   options = SetupOptions( args.options_file )
 
+  YcmCoreSanityCheck()
   extra_conf_store.CallGlobalExtraConfYcmCorePreloadIfExists()
 
   code = CompatibleWithCurrentCore()
@@ -84,7 +103,9 @@ def Main():
   SetUpSignalHandler()
 
   atexit.register( handlers.ServerCleanup )
-  handlers.wsgi_server = PipeServer( handlers.app, inpipe, outpipe )
+
+  pipe = OpenStdPipe()
+  handlers.wsgi_server = PipeServer( handlers.app, pipe )
   handlers.wsgi_server.Run()
 
 if __name__ == '__main__':

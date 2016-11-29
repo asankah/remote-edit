@@ -14,18 +14,10 @@ from threading import Lock, Thread
 from collections import deque
 
 class PipeRequestHandler(Thread):
-  def __init__(self, outlock, environ, app):
-    self.outlock = outlock
+  def __init__(self, stream, environ, app):
+    self.stream = stream
     self.environ = environ
     self.app = app
-    self.daemon = True
-
-  def WriteFrame(self, data):
-    header = json.dumps({'s': len(data), 'i': self.environ.get('pipe.index')})
-    with self.outlock:
-      sys.stdout.write(header + '\n')
-      sys.stdout.write(data)
-      sys.stdout.flush()
 
   def run(self):
 
@@ -36,11 +28,11 @@ class PipeRequestHandler(Thread):
       if not headers_sent:
         d = dict()
         d['st'], d['h'] = headers_set[:] = headers_set
-        self.WriteFrame(json.dumps(d))
+        self.stream.Write(d)
 
       d = dict()
       d['d'] = data
-      self.WriteFrame(json.dumps(d))
+      self.stream.Write(d)
 
     def start_response(status, response_headers, exc_info=None):
       if exc_info:
@@ -63,10 +55,11 @@ class PipeRequestHandler(Thread):
     finally:
       if hasattr(result, 'close'):
         result.close()
+      self.stream.Close()
 
 
 class PipeServer:
-  def __init__(self, app, infile, outfile):
+  def __init__(self, app, pipe):
     self.app = app
     self.request_map = {}
     self.base_environ = {
@@ -82,11 +75,9 @@ class PipeServer:
         'SERVER_PORT': '65535',
         'HTTP_HOST': 'localhost'
     }
-    self.input = infile
-    self.output = outfile
-    self.output_lock = Lock()
+    self.pipe = pipe
 
-  def DispatchRequest(self, h, data):
+  def DispatchRequest(self, stream):
     environ = dict(self.base_environ.items())
     environ['wsgi.input'] = StringIO(data)
     environ['REQUEST_METHOD'] = h.get('m', 'GET')
@@ -94,17 +85,12 @@ class PipeServer:
     environ['QUERY_STRING'] = h.get('q', '')
     environ['CONTENT_LENGTH'] = len(data)
     environ['pipe.index'] = h.get('i', -1)
-    t = PipeRequestHandler(self.output_lock, environ, self.app)
+    t = PipeRequestHandler(stream, environ, self.app)
     t.start()
 
   def Run(self):
-    for line in self.input:
-      h = json.loads(line)
-      if ('s' not in h) or ('i' not in h):
-        sys.stderr.write('Request malformed: "{}"\n'.format(line))
-        return
-
-      data = self.input.read(h.s)
-      self.DispatchRequest(h, data)
+    for stream in self.pipe:
+      self.DispatchRequest(stream)
+    self.pipe.Close()
 
 
