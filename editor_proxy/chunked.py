@@ -12,6 +12,7 @@ import logging
 
 from .channel import Channel
 from threading import Thread, Lock, Event
+from StringIO import StringIO
 
 THREAD_TIMEOUT = 1.0
 
@@ -257,9 +258,15 @@ class InputDispatchThread(Thread):
 
 class ChunkedFileStream:
 
-  def __init__(self, stream, out_token='stdout', input_filter=None):
+  def __init__(self, stream, input_filter=None, output_filter=None):
+    def d(o):
+      assert 'd' in o, 'No "d" field in received object {}.'.format(repr(o))
+      return o.get('d')
+
     self.stream = stream
-    self.out_token = out_token
+    self.output_filter = output_filter
+    self.input_filter = input_filter if input_filter else d
+    self.buffer = ''
 
   def close(self):
     self.stream.Close()
@@ -268,20 +275,46 @@ class ChunkedFileStream:
     pass
 
   def next(self):
-    raise NotImplementedError()
+    s = self.readline()
+    if s == '':
+      raise StopIteration
+    return s
 
   def read(self, size=-1):
-    raise NotImplementedError()
+    if len(self.buffer) == 0:
+      o = self.stream.Read()
+      if o is None:
+        return ''
+
+      self.buffer = self.input_filter(o)
+
+    if size == -1 or size >= len(self.buffer):
+      s = self.buffer
+      self.buffer = ''
+      return s
+    else:
+      s = self.buffer[:size]
+      self.buffer = self.buffer[size:]
+      return s
 
   def readline(self, size=-1):
-    raise NotImplementedError()
+    s = self.read(size)
+    o = s.find('\n')
+    if o == -1 or o == len(s) - 1:
+      return s
+
+    self.buffer = s[o+1:] + self.buffer
+    return s[:o+1]
 
   def readlines(self, size=-1):
-    raise NotImplementedError()
+    return list(self)
 
   def write(self, buf):
-    d = dict()
-    d[self.out_token] = buf
+    if not self.output_filter:
+      d = dict()
+      d['out'] = buf
+    else:
+      d = self.output_filter(buf)
     self.stream.Write(d)
 
   def writelines(self, seq):

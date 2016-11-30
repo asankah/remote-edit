@@ -13,6 +13,7 @@ import logging
 from StringIO import StringIO
 from threading import Lock, Thread
 from collections import deque
+from .chunked import ChunkedFileStream
 
 
 class PipeRequestHandler(Thread):
@@ -81,23 +82,19 @@ class PipeRequestHandler(Thread):
           repr(head))
 
       if 'd' in head:
-        body = head
+        bodystream = StringIO(body.get('d', ''))
+      elif 'o' in head:
+        bodystream = StringIO(json.dumps(body.get('o')))
       else:
-        body = self.stream.Read()
-        logging.debug('Received body %s', repr(body))
-
-      assert body is not None, 'Unexpected EOF while reading request body'
-      assert 'd' in body, '"d" not found in body object: {}'.format(repr(body))
+        bodystream = ChunkedFileStream(self.stream)
 
     except:
       self.stream.Close()
       return
 
-    data = body.get('d', '')
-
     environ = dict(self.environ.items())
-    environ['wsgi.input'] = StringIO(data)
     environ['wsgi.errors'] = sys.stderr
+    environ['wsgi.input'] = bodystream
     environ['REQUEST_METHOD'] = head.get('m', 'GET')
     environ['PATH_INFO'] = head.get('p', '/')
     environ['QUERY_STRING'] = head.get('q', '')
@@ -112,6 +109,7 @@ class PipeRequestHandler(Thread):
 
     result = self.app(environ, start_response)
     try:
+
       for data in result:
         if data:
           self.OnWrite(data)
@@ -124,6 +122,7 @@ class PipeRequestHandler(Thread):
         d['h'] = self.headers
         d['o'] = json.loads(self.buffered_body)
         self.stream.Write(d)
+
     finally:
       if hasattr(result, 'close'):
         result.close()
