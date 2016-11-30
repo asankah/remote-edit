@@ -58,9 +58,9 @@ class ChunkedPipe:
     self.output_thread.Attach(stream)
 
     if not out_of_band:
-      assert stream.index not in self.active_channels, ('Stream id {} is '
-                                                        'already in use').format(
-          stream.index)
+      assert stream.index not in self.active_channels, (
+          'Stream id {} is '
+          'already in use').format(stream.index)
       self.stream_channel.Put(stream)
       self.active_channels.add(stream.index)
       self.quit_event.clear()
@@ -259,6 +259,7 @@ class InputDispatchThread(Thread):
 class ChunkedFileStream:
 
   def __init__(self, stream, input_filter=None, output_filter=None):
+
     def d(o):
       assert 'd' in o, 'No "d" field in received object {}.'.format(repr(o))
       return o.get('d')
@@ -303,8 +304,8 @@ class ChunkedFileStream:
     if o == -1 or o == len(s) - 1:
       return s
 
-    self.buffer = s[o+1:] + self.buffer
-    return s[:o+1]
+    self.buffer = s[o + 1:] + self.buffer
+    return s[:o + 1]
 
   def readlines(self, size=-1):
     return list(self)
