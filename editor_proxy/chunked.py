@@ -27,13 +27,20 @@ class NewStreamError(Exception):
 class ChunkedPipe:
 
   def __init__(self, input_file, output_file):
+    assert hasattr(input_file, 'read')
+    assert hasattr(input_file, 'readline')
+    assert hasattr(output_file, 'write')
+    assert hasattr(output_file, 'flush')
+
+    self.active_channels = set()
+    self.quit_event = Event()
+
     self.stream_channel = Channel(name='ChunkedPipe')
     self.output_thread = OutputDispatchThread(output_file)
     self.input_thread = InputDispatchThread(input_file, self)
+
     self.output_thread.start()
     self.input_thread.start()
-    self.active_channels = set()
-    self.quit_event = Event()
 
   def Close(self):
     self.quit_event.wait()
@@ -275,6 +282,9 @@ class ChunkedFileStream:
   def flush(self):
     pass
 
+  def __iter__(self):
+    return self
+
   def next(self):
     s = self.readline()
     if s == '':
@@ -299,7 +309,21 @@ class ChunkedFileStream:
       return s
 
   def readline(self, size=-1):
-    s = self.read(size)
+    remaining_size = size
+    line_so_far = ''
+    while remaining_size == -1 or remaining_size > 0:
+      s = self.read(remaining_size)
+      if s == '':
+        return line_so_far
+
+      line_so_far += s
+      if remaining_size > 0:
+        remaining_size -= len(s)
+
+      if '\n' in s:
+        break
+
+    s = line_so_far
     o = s.find('\n')
     if o == -1 or o == len(s) - 1:
       return s

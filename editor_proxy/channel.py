@@ -45,6 +45,9 @@ class Channel:
       while len(self.queue) == 0 and not self.done:
         self.cond.wait()
 
+      if self.done:
+        return None
+
       o = self.queue.popleft()
       if o is None:
         self.done = True

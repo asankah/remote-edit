@@ -82,10 +82,13 @@ class PipeRequestHandler(Thread):
           repr(head))
 
       if 'd' in head:
-        bodystream = StringIO(body.get('d', ''))
+        data = body.get('d', '')
+        bodystream = StringIO(data)
       elif 'o' in head:
-        bodystream = StringIO(json.dumps(body.get('o')))
+        data = json.dumps(body.get('o'))
+        bodystream = StringIO(data)
       else:
+        data = None
         bodystream = ChunkedFileStream(self.stream)
 
     except:
@@ -98,7 +101,8 @@ class PipeRequestHandler(Thread):
     environ['REQUEST_METHOD'] = head.get('m', 'GET')
     environ['PATH_INFO'] = head.get('p', '/')
     environ['QUERY_STRING'] = head.get('q', '')
-    environ['CONTENT_LENGTH'] = len(data)
+    if data is not None:
+      environ['CONTENT_LENGTH'] = len(data)
 
     for (k, v) in head.get('h', []):
       key_with_underscores = k.upper().replace('-', '_')

@@ -29,6 +29,12 @@ class ChannelTest(unittest.TestCase):
     c.Close()
     self.assertEqual(None, c.Get())
 
+  def testGetAfterEOF(self):
+    c = Channel()
+    c.Close()
+    self.assertEqual(None, c.Get())
+    self.assertEqual(None, c.Get())
+
   def testOffThreadWrite(self):
     c = Channel()
 
