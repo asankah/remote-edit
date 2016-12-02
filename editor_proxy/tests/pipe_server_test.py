@@ -31,7 +31,8 @@ class PipeServerTest(unittest.TestCase):
 
     @app.post('/echo')
     def Echo():
-      s = request.body.read()
+      s = request.body.readline()
+      self.assertEqual('abc', s)
       return Response(
           body=s,
           headers=[('Content-Type', 'application/json')],
